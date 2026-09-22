@@ -1,9 +1,30 @@
+# Rust build output. Cargo.lock is intentionally tracked for this application.
 /target/
+
+# Local release staging and downloaded project cache.
 /dist/
 /.cache/
-/.idea/
+
+# Downloaded model and runtime artifacts.
+*.gguf
+*.safetensors
 *.part
+
+# Logs and local secrets.
 *.log
-.DS_Store
 .env
 .env.*
+!.env.example
+
+# IDE and editor metadata.
+/.idea/
+/.vscode/
+/.fleet/
+*.swp
+*.swo
+*~
+
+# Operating-system metadata.
+.DS_Store
+Thumbs.db
+Desktop.ini
