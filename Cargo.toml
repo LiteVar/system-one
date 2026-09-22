@@ -36,7 +36,7 @@ tar = "0.4"
 tokenizers = "0.21"
 tokio = { version = "1", features = ["full"] }
 toml = "0.8"
-tower-http = { version = "0.6", features = ["limit", "trace"] }
+tower-http = { version = "0.7", features = ["limit", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 zip = { version = "4", default-features = false, features = ["deflate"] }
