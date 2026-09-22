@@ -39,12 +39,22 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorResponse {
     pub error: ErrorBody,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Vec<ValidationError>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ErrorBody {
     pub code: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ValidationError {
+    pub loc: Vec<String>,
+    pub msg: String,
+    #[serde(rename = "type")]
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +173,7 @@ fn render_instruction(value: &Value) -> Result<String> {
     match value {
         Value::String(s) => Ok(s.clone()),
         Value::Object(_) | Value::Array(_) => Ok(render_json_ascii(value)),
+        Value::Null => Ok(String::new()),
         _ => bail!("instructions must be a string, object, or array"),
     }
 }
@@ -465,6 +476,23 @@ mod tests {
             NormalizedQuestion::from_api("q", request.questions.get("q").unwrap()).unwrap();
         assert_eq!(question.instructions, "");
         assert_eq!(question.labels, ["yes", "no"]);
+    }
+
+    #[test]
+    fn accepts_null_instructions_like_standard_system_one_clients() {
+        let request: SystemOneRequest = serde_json::from_value(serde_json::json!({
+            "state": "hello",
+            "questions": {
+                "q": {
+                    "type": "noul",
+                    "instructions": null
+                }
+            }
+        }))
+        .unwrap();
+        let normalized =
+            NormalizedQuestion::from_api("q", request.questions.get("q").unwrap()).unwrap();
+        assert_eq!(normalized.instructions, "");
     }
 
     #[test]

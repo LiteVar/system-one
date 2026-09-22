@@ -20,6 +20,8 @@
 /.idea/
 /.vscode/
 /.fleet/
+client/dart/.dart_tool/
+client/dart/pubspec.lock
 *.swp
 *.swo
 *~

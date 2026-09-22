@@ -10,7 +10,7 @@ This project is independent and is not affiliated with or endorsed by TypeSafe A
 
 ## Status
 
-This is an alpha release (`0.1.0-alpha.1`). The runtime contains the native tokenizer,
+This is the `0.1.0` release. The runtime contains the native tokenizer,
 Laya decision head, model cache, Jev-shaped API, CLI, managed llama.cpp provisioning,
 and dynamic llama.cpp FFI. The first run downloads the pinned model assets and, when
 no compatible library is found, a pinned CPU/Metal/Vulkan llama.cpp runtime for the
@@ -109,7 +109,8 @@ confidence, and the Laya action probability.
 
 `GET /health` reports process liveness separately from model availability. A loaded
 model returns `status: "ok"`; an unavailable model returns `status: "degraded"` and
-the startup diagnostic. `GET /v1/models` includes the same loaded/error state.
+the startup diagnostic. `GET /v1/models` exposes a standard-compatible `models`
+list and retains the local runtime diagnostics in the `data` list.
 
 This is a Jev-shaped adapter, not a claim of official Jev protocol certification. The
 adapter is isolated from the model backend so additional decision models can be added

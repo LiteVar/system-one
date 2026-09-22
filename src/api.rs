@@ -9,7 +9,7 @@ use serde::Serialize;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::trace::TraceLayer;
 
-use crate::domain::{ErrorResponse, SystemOneRequest};
+use crate::domain::{ErrorResponse, SystemOneRequest, ValidationError};
 use crate::service::DecisionModel;
 
 #[derive(Clone)]
@@ -40,8 +40,17 @@ async fn health(State(state): State<ApiState>) -> impl IntoResponse {
 }
 
 async fn models(State(state): State<ApiState>) -> impl IntoResponse {
+    let card = state.service.model_card();
     Json(ModelsResponse {
-        data: vec![state.service.model_card()],
+        models: vec![StandardModelMetadata {
+            name: card.id.clone(),
+            description: "A local System One decision model.".to_owned(),
+            // The local model manifest currently carries a revision, not a
+            // public release date. Keep the standard field present without
+            // inventing a date; detailed local metadata remains in `data`.
+            release_date: "unknown".to_owned(),
+        }],
+        data: vec![card],
     })
 }
 
@@ -76,7 +85,15 @@ struct HealthResponse {
 
 #[derive(Debug, Serialize)]
 struct ModelsResponse {
+    models: Vec<StandardModelMetadata>,
     data: Vec<crate::service::ModelCard>,
+}
+
+#[derive(Debug, Serialize)]
+struct StandardModelMetadata {
+    name: String,
+    description: String,
+    release_date: String,
 }
 
 #[derive(Debug)]
@@ -94,6 +111,7 @@ impl ApiError {
                     code: "invalid_json".to_owned(),
                     message: error.body_text(),
                 },
+                detail: None,
             },
         }
     }
@@ -106,6 +124,7 @@ impl ApiError {
                     code: "internal_error".to_owned(),
                     message,
                 },
+                detail: None,
             },
         }
     }
@@ -118,18 +137,25 @@ impl ApiError {
                     code: "model_unavailable".to_owned(),
                     message,
                 },
+                detail: None,
             },
         }
     }
 
     fn from_anyhow(error: anyhow::Error) -> Self {
+        let message = error.to_string();
         Self {
             status: StatusCode::UNPROCESSABLE_ENTITY,
             body: ErrorResponse {
                 error: crate::domain::ErrorBody {
                     code: "invalid_request".to_owned(),
-                    message: error.to_string(),
+                    message: message.clone(),
                 },
+                detail: Some(vec![ValidationError {
+                    loc: vec!["body".to_owned()],
+                    msg: message,
+                    kind: "invalid_request".to_owned(),
+                }]),
             },
         }
     }
@@ -138,5 +164,49 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         (self.status, Json(self.body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_response_has_standard_and_local_views() {
+        let response = ModelsResponse {
+            models: vec![StandardModelMetadata {
+                name: "laya-multilingual".to_owned(),
+                description: "A local System One decision model.".to_owned(),
+                release_date: "unknown".to_owned(),
+            }],
+            data: vec![crate::service::ModelCard {
+                id: "laya-multilingual".to_owned(),
+                loaded: true,
+                runtime: crate::runtime::RuntimeInfo {
+                    runtime: "llama.cpp".to_owned(),
+                    source: "managed".to_owned(),
+                    version: None,
+                    path: None,
+                    platform: "test".to_owned(),
+                    architecture: "test".to_owned(),
+                    backend: "cpu".to_owned(),
+                    compatible: true,
+                    error: None,
+                },
+                error: None,
+            }],
+        };
+        let json = serde_json::to_value(response).unwrap();
+        assert_eq!(json["models"][0]["name"], "laya-multilingual");
+        assert_eq!(json["data"][0]["id"], "laya-multilingual");
+        assert_eq!(json["data"][0]["loaded"], true);
+    }
+
+    #[test]
+    fn invalid_request_error_has_standard_detail_and_local_error() {
+        let error = ApiError::from_anyhow(anyhow::anyhow!("questions must not be empty"));
+        let json = serde_json::to_value(error.body).unwrap();
+        assert_eq!(json["error"]["code"], "invalid_request");
+        assert_eq!(json["detail"][0]["type"], "invalid_request");
     }
 }

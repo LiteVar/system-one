@@ -1,0 +1,16 @@
+name: system_one
+description: A pure Dart client for System One and Jev-style HTTP APIs.
+version: 0.1.0
+repository: https://github.com/LiteVar/system-one
+homepage: https://github.com/LiteVar/system-one
+issue_tracker: https://github.com/LiteVar/system-one/issues
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  http: ">=1.2.0 <2.0.0"
+
+dev_dependencies:
+  lints: ">=5.0.0 <7.0.0"
+  test: ">=1.25.0 <2.0.0"
