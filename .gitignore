@@ -1,6 +1,7 @@
 /target/
 /dist/
 /.cache/
+/.idea/
 *.part
 *.log
 .DS_Store

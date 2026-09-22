@@ -1,8 +1,8 @@
 System One
-Copyright 2026 System One contributors
+Copyright 2026 LiteVar
 
-The Rust source code in this repository is licensed under the Apache License,
-Version 2.0. See LICENSE.
+The Rust source code in this repository is licensed under the MIT License.
+See LICENSE.
 
 Model and runtime artifacts are not bundled in this repository. They are downloaded
 at runtime from their respective upstream projects and remain subject to their own

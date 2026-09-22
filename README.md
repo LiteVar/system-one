@@ -1,5 +1,7 @@
 # System One
 
+[English](README.md) | [简体中文](README-zh_CN.md)
+
 System One is an open-source, local-first, cross-platform runtime for System One decision models. It exposes a Jev-compatible `POST /v1/systemone` API and a native CLI without requiring Python, PyTorch, Transformers, Conda, or a virtual environment.
 
 The first backend is Laya Multilingual. The public API is intentionally model-independent; Laya is one implementation of the `DecisionModel` abstraction.
@@ -173,6 +175,6 @@ the model and runtime into the user cache.
 
 ## License
 
-The Rust source is Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Model
+The Rust source is licensed under the MIT License and is copyright LiteVar. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Model
 files and runtime libraries retain their upstream licenses and are not bundled in
-this repository.
+this repository. Project homepage: <https://github.com/LiteVar/system-one>.
