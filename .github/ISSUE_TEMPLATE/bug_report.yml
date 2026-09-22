@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible problem in System One
+title: "[bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove secrets and sensitive state before posting logs.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: "0.1.0-alpha.1 or abc1234"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "macOS 15 arm64, Windows 11 x86_64, ..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: text

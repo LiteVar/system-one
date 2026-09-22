@@ -1,0 +1,48 @@
+[package]
+name = "system-one"
+version = "0.1.0-alpha.1"
+edition = "2024"
+description = "Open-source, local-first runtime for System One decision models"
+license = "Apache-2.0"
+documentation = "https://docs.rs/system-one"
+readme = "README.md"
+rust-version = "1.85"
+keywords = ["system-one", "decision-model", "llama.cpp", "inference"]
+categories = ["command-line-utilities", "science", "web-programming"]
+default-run = "system-one"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4.5", features = ["derive", "env"] }
+directories = "6"
+flate2 = "1"
+futures-util = "0.3"
+half = "2"
+hex = "0.4"
+indexmap = { version = "2", features = ["serde"] }
+libc = "0.2"
+libloading = "0.8"
+libm = "0.2"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+safetensors = "0.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tar = "0.4"
+tokenizers = "0.21"
+tokio = { version = "1", features = ["full"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["limit", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+zip = { version = "4", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

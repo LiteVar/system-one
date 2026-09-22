@@ -1,0 +1,8 @@
+/target/
+/dist/
+/.cache/
+*.part
+*.log
+.DS_Store
+.env
+.env.*

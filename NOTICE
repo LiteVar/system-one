@@ -1,0 +1,23 @@
+System One
+Copyright 2026 System One contributors
+
+The Rust source code in this repository is licensed under the Apache License,
+Version 2.0. See LICENSE.
+
+Model and runtime artifacts are not bundled in this repository. They are downloaded
+at runtime from their respective upstream projects and remain subject to their own
+licenses and terms. The published Laya GGUF model card currently declares
+Apache-2.0 for the conversion; verify the upstream terms before redistributing any
+downloaded artifact:
+
+- Laya Multilingual GGUF assets:
+  https://huggingface.co/Weidows/laya-multilingual-GGUF
+- Laya reference implementation:
+  https://github.com/NandhaKishorM/laya
+- llama.cpp runtime:
+  https://github.com/ggml-org/llama.cpp
+
+Rust dependencies retain their respective upstream copyright and license notices.
+Generated binaries may therefore include components distributed under MIT, Apache-2.0,
+BSD, ISC, and other permissive licenses. Consult Cargo.lock and the dependency
+projects for the complete third-party inventory.
