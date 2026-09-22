@@ -61,7 +61,7 @@ jobs:
           cp "$binary" "$staging/"
           cp README.md LICENSE NOTICE "$staging/"
           tar -czf "dist/system-one-${TAG}-${PLATFORM}.tar.gz" -C dist "system-one-${TAG}-${PLATFORM}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: system-one-${{ matrix.platform }}
           path: dist/system-one-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz
