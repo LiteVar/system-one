@@ -45,6 +45,10 @@ fn init_logging(verbose: bool) {
 
 fn build_config(cli: &Cli) -> Result<AppConfig> {
     let file = load_file_config(cli.config.as_deref())?;
+    let environment_offline = std::env::var("SYSTEM_ONE_OFFLINE")
+        .ok()
+        .map(|value| parse_environment_bool("SYSTEM_ONE_OFFLINE", &value))
+        .transpose()?;
     let cache_dir = cli
         .cache_dir
         .clone()
@@ -69,7 +73,9 @@ fn build_config(cli: &Cli) -> Result<AppConfig> {
     };
     Ok(AppConfig {
         cache_dir,
-        offline: cli.offline || file.offline.unwrap_or(false),
+        offline: cli.offline
+            || environment_offline.unwrap_or(false)
+            || file.offline.unwrap_or(false),
         llama_cpp_home,
         device,
         model: cli
@@ -84,6 +90,14 @@ fn build_config(cli: &Cli) -> Result<AppConfig> {
             .unwrap_or_else(|| "127.0.0.1".to_owned()),
         port: cli.port.or(file.port).unwrap_or(8080),
     })
+}
+
+fn parse_environment_bool(name: &str, value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => bail!("invalid {name} value `{value}`; expected 1/0 or true/false"),
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]

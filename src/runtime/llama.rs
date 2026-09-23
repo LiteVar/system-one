@@ -93,6 +93,8 @@ struct LlamaBatch {
 type VersionFn = unsafe extern "C" fn() -> *const c_char;
 type ModelDefaultParamsFn = unsafe extern "C" fn() -> LlamaModelParams;
 type ContextDefaultParamsFn = unsafe extern "C" fn() -> LlamaContextParams;
+type BackendLoadAllFn = unsafe extern "C" fn();
+type BackendLoadAllFromPathFn = unsafe extern "C" fn(*const c_char);
 type BackendInitFn = unsafe extern "C" fn();
 type BackendFreeFn = unsafe extern "C" fn();
 type ModelLoadFn = unsafe extern "C" fn(*const c_char, LlamaModelParams) -> *mut LlamaModel;
@@ -113,6 +115,8 @@ struct Api {
     version: VersionFn,
     model_default_params: ModelDefaultParamsFn,
     context_default_params: ContextDefaultParamsFn,
+    backend_load_all: Option<BackendLoadAllFn>,
+    backend_load_all_from_path: Option<BackendLoadAllFromPathFn>,
     backend_init: BackendInitFn,
     backend_free: BackendFreeFn,
     model_load: ModelLoadFn,
@@ -153,11 +157,19 @@ impl LlamaLibrary {
                 .with_context(|| format!("missing llama.cpp symbol {:?}", name))?;
             Ok(*symbol)
         }
+        unsafe fn optional_symbol<T: Copy>(library: &Library, name: &[u8]) -> Option<T> {
+            unsafe { library.get::<T>(name).ok().map(|symbol| *symbol) }
+        }
         let api = unsafe {
             Api {
                 version: symbol(&library, b"llama_version\0")?,
                 model_default_params: symbol(&library, b"llama_model_default_params\0")?,
                 context_default_params: symbol(&library, b"llama_context_default_params\0")?,
+                backend_load_all: optional_symbol(&library, b"ggml_backend_load_all\0"),
+                backend_load_all_from_path: optional_symbol(
+                    &library,
+                    b"ggml_backend_load_all_from_path\0",
+                ),
                 backend_init: symbol(&library, b"llama_backend_init\0")?,
                 backend_free: symbol(&library, b"llama_backend_free\0")?,
                 model_load: symbol(&library, b"llama_model_load_from_file\0")?,
@@ -241,6 +253,17 @@ impl LlamaEncoder {
             bail!("llama context dimensions must be positive")
         }
         let api = &library.api;
+        let runtime_dir = library
+            .path
+            .parent()
+            .map(Path::to_path_buf)
+            .context("llama.cpp library has no parent directory")?;
+        let runtime_dir_c = CString::new(runtime_dir.to_string_lossy().as_bytes())?;
+        if let Some(load_all_from_path) = api.backend_load_all_from_path {
+            unsafe { load_all_from_path(runtime_dir_c.as_ptr()) };
+        } else if let Some(load_all) = api.backend_load_all {
+            unsafe { load_all() };
+        }
         unsafe { (api.backend_init)() };
         let model_path_c = CString::new(model_path.to_string_lossy().as_bytes())?;
         let mut model_params = unsafe { (api.model_default_params)() };
