@@ -13,7 +13,7 @@ response, and it preserves raw JSON for forward compatibility.
 
 ```yaml
 dependencies:
-  system_one: ^0.1.0
+  system_one: ^0.1.1
 ```
 
 Import the package with:

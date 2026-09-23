@@ -508,4 +508,56 @@ mod tests {
         assert_eq!(answer["confidence"], 0.8);
         assert_eq!(answer["action"]["act_probability"], 0.7);
     }
+
+    #[test]
+    fn returns_answer_shapes_for_choice_score_and_noul() {
+        let questions = [
+            (
+                "choice",
+                Question {
+                    kind: "choice".to_owned(),
+                    instructions: Value::String("pick one".to_owned()),
+                    criteria: Some(serde_json::json!(["allow", "deny"])),
+                },
+                vec![0.75, 0.25],
+            ),
+            (
+                "score",
+                Question {
+                    kind: "score".to_owned(),
+                    instructions: Value::String("rate it".to_owned()),
+                    criteria: Some(serde_json::json!(["low", "medium", "high"])),
+                },
+                vec![0.2, 0.3, 0.5],
+            ),
+            (
+                "noul",
+                Question {
+                    kind: "noul".to_owned(),
+                    instructions: Value::String("is it true?".to_owned()),
+                    criteria: None,
+                },
+                vec![0.1, 0.9],
+            ),
+        ];
+
+        for (id, question, probabilities) in questions {
+            let normalized = NormalizedQuestion::from_api(id, &question).unwrap();
+            let answer = answer_from_distribution(&normalized, &probabilities, 0.7, 0.6).unwrap();
+            assert_eq!(answer["type"], id);
+            assert!(answer["action"]["act_probability"].is_number());
+            match id {
+                "choice" => {
+                    assert_eq!(answer["choice"], "allow");
+                    assert_eq!(answer["probabilities"].as_object().unwrap().len(), 2);
+                }
+                "score" => {
+                    assert_eq!(answer["score"], 1.3);
+                    assert_eq!(answer["legend"].as_object().unwrap().len(), 3);
+                }
+                "noul" => assert_eq!(answer["noul"], 0.9),
+                _ => unreachable!(),
+            }
+        }
+    }
 }

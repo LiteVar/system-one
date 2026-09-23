@@ -10,7 +10,7 @@ System One 是一个开源、本地优先、跨平台的 System One 决策模型
 
 ## 当前状态
 
-当前为 `0.1.0` 版本。运行时包含原生 tokenizer、Laya 决策头、模型缓存、Jev 形状的 API、CLI、受管理的 llama.cpp 运行时配置，以及动态 llama.cpp FFI。首次运行会下载固定版本的模型资源；当本机找不到兼容库时，还会为当前平台下载固定版本的 CPU/Metal/Vulkan llama.cpp 运行时。选中的运行时会在进程生命周期内常驻。
+当前为 `0.1.1` 版本。运行时包含原生 tokenizer、Laya 决策头、模型缓存、Jev 形状的 API、CLI、受管理的 llama.cpp 运行时配置，以及动态 llama.cpp FFI。首次运行会下载固定版本的模型资源；当本机找不到兼容库时，还会为当前平台下载固定版本的 CPU/Metal/Vulkan llama.cpp 运行时。选中的运行时会在进程生命周期内常驻。
 
 原生路径已经在 macOS arm64 上完成端到端 smoke test。跨平台 CI 会检查支持目标的源码编译和 release 构建；硬件后端和 reference vector 验证仍属于发布前检查项。
 

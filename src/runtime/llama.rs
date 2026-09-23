@@ -1,5 +1,6 @@
 use std::ffi::{CStr, CString, c_char, c_float, c_int, c_void};
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -227,7 +228,7 @@ pub struct LlamaEncoder {
     model: *mut LlamaModel,
     context: *mut LlamaContext,
     embd: usize,
-    max_tokens: usize,
+    micro_batch_tokens: usize,
     max_sequences: usize,
 }
 
@@ -239,6 +240,89 @@ pub struct EncoderOutput {
     pub hidden: Vec<f32>,
     pub tokens: usize,
     pub width: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EncodeBatch {
+    sequence_range: Range<usize>,
+    token_count: usize,
+}
+
+struct PackedBatch {
+    tokens: Vec<i32>,
+    positions: Vec<i32>,
+    sequence_ids: Vec<i32>,
+}
+
+fn plan_encode_batches(
+    sequence_lengths: &[usize],
+    max_tokens: usize,
+    max_sequences: usize,
+) -> Result<Vec<EncodeBatch>> {
+    if max_tokens == 0 || max_sequences == 0 {
+        bail!("llama context dimensions must be positive")
+    }
+    if sequence_lengths.len() > max_sequences {
+        bail!(
+            "request contains {} questions; maximum is {}",
+            sequence_lengths.len(),
+            max_sequences
+        )
+    }
+    let total_tokens = sequence_lengths
+        .iter()
+        .try_fold(0usize, |total, length| total.checked_add(*length))
+        .context("request token count overflowed")?;
+    if total_tokens == 0 || total_tokens > max_tokens.saturating_mul(max_sequences) {
+        bail!("request contains too many tokens: {total_tokens}")
+    }
+    for length in sequence_lengths {
+        if *length > max_tokens {
+            bail!("one question contains {length} tokens; maximum is {max_tokens}")
+        }
+    }
+
+    let mut batches = Vec::new();
+    let mut batch_start = 0usize;
+    let mut batch_tokens = 0usize;
+    for (sequence_id, length) in sequence_lengths.iter().copied().enumerate() {
+        if length > 0 && batch_tokens > 0 && batch_tokens + length > max_tokens {
+            batches.push(EncodeBatch {
+                sequence_range: batch_start..sequence_id,
+                token_count: batch_tokens,
+            });
+            batch_start = sequence_id;
+            batch_tokens = 0;
+        }
+        batch_tokens += length;
+    }
+    if batch_tokens > 0 {
+        batches.push(EncodeBatch {
+            sequence_range: batch_start..sequence_lengths.len(),
+            token_count: batch_tokens,
+        });
+    }
+    Ok(batches)
+}
+
+fn pack_batch(sequences: &[Vec<i32>], sequence_range: Range<usize>) -> PackedBatch {
+    let token_count = sequence_range
+        .clone()
+        .map(|sequence_id| sequences[sequence_id].len())
+        .sum();
+    let mut packed = PackedBatch {
+        tokens: Vec::with_capacity(token_count),
+        positions: Vec::with_capacity(token_count),
+        sequence_ids: Vec::with_capacity(token_count),
+    };
+    for sequence_id in sequence_range {
+        for (position, token) in sequences[sequence_id].iter().copied().enumerate() {
+            packed.tokens.push(token);
+            packed.positions.push(position as c_int);
+            packed.sequence_ids.push(sequence_id as c_int);
+        }
+    }
+    packed
 }
 
 impl LlamaEncoder {
@@ -319,7 +403,7 @@ impl LlamaEncoder {
             model,
             context,
             embd: embd as usize,
-            max_tokens,
+            micro_batch_tokens: max_tokens,
             max_sequences,
         })
     }
@@ -332,80 +416,87 @@ impl LlamaEncoder {
         if sequences.is_empty() {
             return Ok(Vec::new());
         }
-        if sequences.len() > self.max_sequences {
-            bail!(
-                "request contains {} questions; maximum is {}",
-                sequences.len(),
-                self.max_sequences
-            )
-        }
-        let total_tokens = sequences.iter().map(Vec::len).sum::<usize>();
-        if total_tokens == 0 || total_tokens > self.max_tokens.saturating_mul(self.max_sequences) {
-            bail!("request contains too many tokens: {total_tokens}")
-        }
-        let mut batch = unsafe {
-            (self.library.api.batch_init)(total_tokens as c_int, 0, sequences.len() as c_int)
-        };
-        batch.n_tokens = total_tokens as c_int;
-        if batch.token.is_null()
-            || batch.pos.is_null()
-            || batch.n_seq_id.is_null()
-            || batch.seq_id.is_null()
-            || batch.logits.is_null()
-        {
-            unsafe { (self.library.api.batch_free)(batch) };
-            bail!("llama.cpp returned an incomplete batch")
-        }
-        let mut index = 0usize;
-        for (sequence_id, tokens) in sequences.iter().enumerate() {
-            if tokens.len() > self.max_tokens {
+        let sequence_lengths = sequences.iter().map(Vec::len).collect::<Vec<_>>();
+        let batches = plan_encode_batches(
+            &sequence_lengths,
+            self.micro_batch_tokens,
+            self.max_sequences,
+        )?;
+        let mut outputs = (0..sequences.len())
+            .map(|_| None)
+            .collect::<Vec<Option<EncoderOutput>>>();
+
+        for batch_plan in batches {
+            let packed = pack_batch(sequences, batch_plan.sequence_range.clone());
+            debug_assert_eq!(packed.tokens.len(), batch_plan.token_count);
+            let token_capacity = c_int::try_from(batch_plan.token_count)
+                .context("micro-batch token count does not fit in llama.cpp's integer range")?;
+            let sequence_capacity = c_int::try_from(batch_plan.sequence_range.len())
+                .context("micro-batch sequence count does not fit in llama.cpp's integer range")?;
+            let mut batch =
+                unsafe { (self.library.api.batch_init)(token_capacity, 0, sequence_capacity) };
+            batch.n_tokens = token_capacity;
+            if batch.token.is_null()
+                || batch.pos.is_null()
+                || batch.n_seq_id.is_null()
+                || batch.seq_id.is_null()
+                || batch.logits.is_null()
+            {
                 unsafe { (self.library.api.batch_free)(batch) };
-                bail!(
-                    "one question contains {} tokens; maximum is {}",
-                    tokens.len(),
-                    self.max_tokens
-                )
+                bail!("llama.cpp returned an incomplete batch")
             }
-            for (position, token) in tokens.iter().copied().enumerate() {
+            for index in 0..batch_plan.token_count {
                 unsafe {
-                    *batch.token.add(index) = token;
-                    *batch.pos.add(index) = position as c_int;
+                    *batch.token.add(index) = packed.tokens[index];
+                    *batch.pos.add(index) = packed.positions[index];
                     *batch.n_seq_id.add(index) = 1;
-                    **batch.seq_id.add(index) = sequence_id as c_int;
+                    **batch.seq_id.add(index) = packed.sequence_ids[index];
                     *batch.logits.add(index) = 1;
                 }
-                index += 1;
             }
-        }
-        let result = unsafe { (self.library.api.encode)(self.context, batch) };
-        if result != 0 {
-            unsafe { (self.library.api.batch_free)(batch) };
-            bail!("llama_encode failed with status {result}")
-        }
-        unsafe { (self.library.api.synchronize)(self.context) };
+            debug_assert!(batch.n_tokens as usize <= self.micro_batch_tokens);
+            let result = unsafe { (self.library.api.encode)(self.context, batch) };
+            if result != 0 {
+                unsafe { (self.library.api.batch_free)(batch) };
+                bail!("llama_encode failed with status {result}")
+            }
+            unsafe { (self.library.api.synchronize)(self.context) };
 
-        let mut outputs = Vec::with_capacity(sequences.len());
-        let mut output_index = 0i32;
-        for sequence in sequences {
-            let mut hidden = Vec::with_capacity(sequence.len() * self.embd);
-            for _ in sequence {
-                let ptr = unsafe { (self.library.api.get_embedding)(self.context, output_index) };
-                if ptr.is_null() {
-                    unsafe { (self.library.api.batch_free)(batch) };
-                    bail!("llama.cpp returned a null token embedding at output {output_index}")
+            // Embeddings are owned by the llama context and can be overwritten by the next
+            // llama_encode call, so copy every output before submitting another micro-batch.
+            let mut output_index = 0i32;
+            for sequence_id in batch_plan.sequence_range.clone() {
+                let sequence = &sequences[sequence_id];
+                let mut hidden = Vec::with_capacity(sequence.len() * self.embd);
+                for _ in sequence {
+                    let ptr =
+                        unsafe { (self.library.api.get_embedding)(self.context, output_index) };
+                    if ptr.is_null() {
+                        unsafe { (self.library.api.batch_free)(batch) };
+                        bail!("llama.cpp returned a null token embedding at output {output_index}")
+                    }
+                    let values = unsafe { std::slice::from_raw_parts(ptr, self.embd) };
+                    hidden.extend_from_slice(values);
+                    output_index += 1;
                 }
-                let values = unsafe { std::slice::from_raw_parts(ptr, self.embd) };
-                hidden.extend_from_slice(values);
-                output_index += 1;
+                outputs[sequence_id] = Some(EncoderOutput {
+                    hidden,
+                    tokens: sequence.len(),
+                    width: self.embd,
+                });
             }
-            outputs.push(EncoderOutput {
-                hidden,
-                tokens: sequence.len(),
-                width: self.embd,
-            });
+            unsafe { (self.library.api.batch_free)(batch) };
         }
-        unsafe { (self.library.api.batch_free)(batch) };
-        Ok(outputs)
+
+        outputs
+            .into_iter()
+            .enumerate()
+            .map(|(sequence_id, output)| {
+                output.with_context(|| {
+                    format!("llama.cpp did not return an embedding for question {sequence_id}")
+                })
+            })
+            .collect()
     }
 }
 
@@ -525,4 +616,153 @@ fn find_library_in_directory(directory: &Path) -> Result<Option<PathBuf>> {
         }
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{NormalizedQuestion, QuestionKind, SystemOneRequest};
+
+    const MAX_TOKENS: usize = 1024;
+    const MAX_SEQUENCES: usize = 16;
+
+    #[test]
+    fn choice_and_three_noul_sequences_over_1024_are_batched_in_order() {
+        let request: SystemOneRequest = serde_json::from_value(serde_json::json!({
+            "state": "large multi-question request",
+            "questions": {
+                "choice": {"type": "choice", "options": ["allow", "deny"]},
+                "noul-1": {"type": "noul"},
+                "noul-2": {"type": "noul"},
+                "noul-3": {"type": "noul"}
+            }
+        }))
+        .unwrap();
+        let questions = request
+            .questions
+            .iter()
+            .map(|(id, question)| NormalizedQuestion::from_api(id.clone(), question).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            questions
+                .iter()
+                .map(|question| question.kind)
+                .collect::<Vec<_>>(),
+            [
+                QuestionKind::Choice,
+                QuestionKind::Noul,
+                QuestionKind::Noul,
+                QuestionKind::Noul
+            ]
+        );
+
+        // Four tokenized question sequences representing the request above.
+        let sequences = (0..4)
+            .map(|sequence_id| {
+                (0..300)
+                    .map(|position| sequence_id * 1000 + position)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let lengths = sequences.iter().map(Vec::len).collect::<Vec<_>>();
+        assert!(lengths.iter().sum::<usize>() > MAX_TOKENS);
+
+        let batches = plan_encode_batches(&lengths, MAX_TOKENS, MAX_SEQUENCES).unwrap();
+        assert_eq!(
+            batches,
+            [
+                EncodeBatch {
+                    sequence_range: 0..3,
+                    token_count: 900
+                },
+                EncodeBatch {
+                    sequence_range: 3..4,
+                    token_count: 300
+                }
+            ]
+        );
+
+        let mut sequence_order = Vec::new();
+        for batch in batches {
+            assert!(batch.token_count <= MAX_TOKENS);
+            sequence_order.extend(batch.sequence_range.clone());
+            let packed = pack_batch(&sequences, batch.sequence_range.clone());
+            let mut token_index = 0;
+            for sequence_id in batch.sequence_range {
+                for (position, token) in sequences[sequence_id].iter().copied().enumerate() {
+                    assert_eq!(packed.sequence_ids[token_index], sequence_id as c_int);
+                    assert_eq!(packed.positions[token_index], position as c_int);
+                    assert_eq!(packed.tokens[token_index], token);
+                    token_index += 1;
+                }
+            }
+            assert_eq!(token_index, batch.token_count);
+        }
+        assert_eq!(sequence_order, [0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn packs_multiple_batches_without_splitting_or_reordering_sequences() {
+        let sequences = [600, 500, 400, 300, 200]
+            .into_iter()
+            .enumerate()
+            .map(|(sequence_id, length)| vec![sequence_id as i32; length])
+            .collect::<Vec<_>>();
+        let lengths = sequences.iter().map(Vec::len).collect::<Vec<_>>();
+        let batches = plan_encode_batches(&lengths, MAX_TOKENS, MAX_SEQUENCES).unwrap();
+
+        assert_eq!(
+            batches,
+            [
+                EncodeBatch {
+                    sequence_range: 0..1,
+                    token_count: 600
+                },
+                EncodeBatch {
+                    sequence_range: 1..3,
+                    token_count: 900
+                },
+                EncodeBatch {
+                    sequence_range: 3..5,
+                    token_count: 500
+                }
+            ]
+        );
+        let packed_sequence_ids = batches
+            .iter()
+            .flat_map(|batch| pack_batch(&sequences, batch.sequence_range.clone()).sequence_ids)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            packed_sequence_ids,
+            sequences
+                .iter()
+                .enumerate()
+                .flat_map(|(sequence_id, sequence)| {
+                    std::iter::repeat_n(sequence_id as c_int, sequence.len())
+                })
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn accepts_existing_maximum_sequence_and_total_token_limits() {
+        let lengths = vec![MAX_TOKENS; MAX_SEQUENCES];
+        let batches = plan_encode_batches(&lengths, MAX_TOKENS, MAX_SEQUENCES).unwrap();
+
+        assert_eq!(lengths.iter().sum::<usize>(), MAX_TOKENS * MAX_SEQUENCES);
+        assert_eq!(batches.len(), MAX_SEQUENCES);
+        assert!(batches.iter().all(|batch| batch.token_count == MAX_TOKENS));
+        assert_eq!(
+            batches
+                .iter()
+                .flat_map(|batch| batch.sequence_range.clone())
+                .collect::<Vec<_>>(),
+            (0..MAX_SEQUENCES).collect::<Vec<_>>()
+        );
+        assert!(plan_encode_batches(&[MAX_TOKENS + 1], MAX_TOKENS, MAX_SEQUENCES).is_err());
+        assert!(
+            plan_encode_batches(&[MAX_TOKENS; MAX_SEQUENCES + 1], MAX_TOKENS, MAX_SEQUENCES)
+                .is_err()
+        );
+    }
 }

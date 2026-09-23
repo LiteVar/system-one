@@ -1,6 +1,6 @@
 [package]
 name = "system-one"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Open-source, local-first runtime for System One decision models"
 license = "MIT"

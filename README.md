@@ -10,7 +10,7 @@ This project is independent and is not affiliated with or endorsed by TypeSafe A
 
 ## Status
 
-This is the `0.1.0` release. The runtime contains the native tokenizer,
+This is the `0.1.1` release. The runtime contains the native tokenizer,
 Laya decision head, model cache, Jev-shaped API, CLI, managed llama.cpp provisioning,
 and dynamic llama.cpp FFI. The first run downloads the pinned model assets and, when
 no compatible library is found, a pinned CPU/Metal/Vulkan llama.cpp runtime for the
